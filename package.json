@@ -1,0 +1,25 @@
+{
+  "name": "broue-elm",
+  "version": "1.0.0",
+  "description": "This project is bootstrapped with [Create Elm App](https://github.com/halfzebra/create-elm-app).",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "dependencies": {
+    "autoprefixer": "^8.0.0",
+    "css-loader": "^0.28.9",
+    "postcss-flexbugs-fixes": "^3.3.0",
+    "postcss-loader": "2.1.5",
+    "style-loader": "^0.21.0"
+  },
+  "devDependencies": {
+    "tailwindcss": "^0.7.2"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

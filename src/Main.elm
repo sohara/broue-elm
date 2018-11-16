@@ -2,7 +2,7 @@ module Main exposing (Model, Msg(..), init, main, update, view)
 
 import Browser
 import Html exposing (Html, div, h1, img, text)
-import Html.Attributes exposing (src)
+import Html.Attributes exposing (class, src)
 import Json.Decode as Decode exposing (Decoder, bool, int, list, map, string)
 import MockData exposing (brewJSON)
 
@@ -65,9 +65,8 @@ view model =
             text "Not good"
 
         Success brewModel ->
-            div []
-                [ img [ src "/logo.svg" ] []
-                , h1 [] [ text brewModel.name ]
+            div [ class "mx-auto h-full flex justify-center items-center" ]
+                [ h1 [ class "font-hairline mb-6 mt-6" ] [ text brewModel.name ]
                 ]
 
 
