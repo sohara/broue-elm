@@ -28,6 +28,7 @@ type alias Brew =
     { name : String
     , createdAt : Time.Posix
     , batchSizeLitres : Float
+    , efficiency : Int
     , boilLossLitres : Float
     , fermentables : List Fermentable
     }
@@ -36,6 +37,8 @@ type alias Brew =
 type alias Fermentable =
     { name : String
     , weightGrams : Float
+    , totalYield : Int
+    , fermentableType : String
     }
 
 
@@ -51,12 +54,13 @@ brew json =
 
 brewDecoder : Decoder Brew
 brewDecoder =
-    Decode.map5
-        (\brewName createdAt batchSizeLitres boilLossLitres fermentables ->
+    Decode.map6
+        (\brewName createdAt batchSizeLitres boilLossLitres efficiency fermentables ->
             { brewName = brewName
             , createdAt = createdAt
             , batchSizeLitres = batchSizeLitres
             , boilLossLitres = boilLossLitres
+            , efficiency = efficiency
             , fermentables = fermentables
             }
         )
@@ -64,12 +68,16 @@ brewDecoder =
         (Decode.at [ "brew", "created_at" ] Extra.datetime)
         (Decode.at [ "brew", "batch_size_litres" ] Extra.parseFloat)
         (Decode.at [ "brew", "boil_loss_litres" ] Extra.parseFloat)
+        (Decode.at [ "brew", "efficiency" ] Decode.int)
         (Decode.field "fermentables" (Decode.list fermentableDecoder))
         |> Decode.andThen
-            (\{ brewName, createdAt, batchSizeLitres, boilLossLitres, fermentables } ->
+            (\{ brewName, createdAt, batchSizeLitres, boilLossLitres, efficiency, fermentables } ->
                 let
+                    rawFermentablesTupleList =
+                        List.map (\n -> ( n.id, n )) fermentables
+
                     fermentablesDict =
-                        Dict.fromList fermentables
+                        Dict.fromList rawFermentablesTupleList
                 in
                 Decode.field "fermentable_additions" (Decode.list (fermentableAdditionDecoder fermentablesDict))
                     |> Decode.andThen
@@ -79,20 +87,27 @@ brewDecoder =
                                 , createdAt = createdAt
                                 , batchSizeLitres = batchSizeLitres
                                 , boilLossLitres = boilLossLitres
+                                , efficiency = efficiency
                                 , fermentables = additions
                                 }
                         )
             )
 
 
-fermentableDecoder : Decoder ( Int, String )
+type alias RawFermentable =
+    { id : Int, name : String, totalYield : Int, fermentableType : String }
+
+
+fermentableDecoder : Decoder RawFermentable
 fermentableDecoder =
-    Decode.map2 Tuple.pair
+    Decode.map4 RawFermentable
         (Decode.field "id" Decode.int)
         (Decode.field "name" Decode.string)
+        (Decode.field "total_yield" Decode.int)
+        (Decode.field "fermentable_type" Decode.string)
 
 
-fermentableAdditionDecoder : Dict Int String -> Decoder Fermentable
+fermentableAdditionDecoder : Dict Int RawFermentable -> Decoder Fermentable
 fermentableAdditionDecoder fermentablesDict =
     Decode.map2 Tuple.pair
         (Decode.field "fermentable_id" Decode.int)
@@ -100,10 +115,12 @@ fermentableAdditionDecoder fermentablesDict =
         |> Decode.andThen
             (\( id, weightGrams ) ->
                 case Dict.get id fermentablesDict of
-                    Just name ->
+                    Just rawFermentable ->
                         Decode.succeed
-                            { name = name
+                            { name = rawFermentable.name
                             , weightGrams = weightGrams
+                            , totalYield = rawFermentable.totalYield
+                            , fermentableType = rawFermentable.fermentableType
                             }
 
                     Nothing ->
@@ -146,7 +163,57 @@ view model =
                 , p [] [ text ("Total Weight: " ++ totalWeight brewModel.fermentables) ]
                 , p [] [ text ("Batch Size Litres" ++ String.fromFloat brewModel.batchSizeLitres) ]
                 , p [] [ text ("Boil Loss Litres" ++ String.fromFloat brewModel.boilLossLitres) ]
+                , p [] [ text ("Original Gravity" ++ String.fromFloat (roundFloat (originalGravity brewModel) 3)) ]
                 ]
+
+
+roundFloat : Float -> Int -> Float
+roundFloat value places =
+    let
+        multiplier =
+            10 ^ places
+    in
+    toFloat (round (value * toFloat multiplier)) / toFloat multiplier
+
+
+originalGravity : Brew -> Float
+originalGravity brewModel =
+    let
+        mashedExtractUnits =
+            getMashedExtractUnits brewModel.fermentables
+
+        unmashedExtractUnits =
+            getUnmashedExtractUnits brewModel.fermentables
+
+        mashedGravity =
+            (mashedExtractUnits * 0.3865 * (toFloat brewModel.efficiency / 100)) / brewModel.batchSizeLitres
+
+        unmashedGravity =
+            (unmashedExtractUnits * 0.3865) / brewModel.batchSizeLitres
+    in
+    1 + mashedGravity + unmashedGravity
+
+
+getMashedExtractUnits : List Fermentable -> Float
+getMashedExtractUnits fermentables =
+    List.filter (\fermentable -> mashable fermentable) fermentables
+        |> List.foldl (\fermentable total -> total + extractUnits fermentable) 0
+
+
+getUnmashedExtractUnits : List Fermentable -> Float
+getUnmashedExtractUnits fermentables =
+    List.filter (\fermentable -> not (mashable fermentable)) fermentables
+        |> List.foldl (\fermentable total -> total + extractUnits fermentable) 0
+
+
+extractUnits : Fermentable -> Float
+extractUnits fermentable =
+    (fermentable.weightGrams / 1000) * (toFloat fermentable.totalYield / 100)
+
+
+mashable : Fermentable -> Bool
+mashable fermentable =
+    List.member fermentable.fermentableType [ "Grain", "Adjunct" ]
 
 
 totalWeight : List Fermentable -> String
@@ -165,7 +232,14 @@ listFermentables fermentables =
 
 fermentableItem : Fermentable -> Html Msg
 fermentableItem fermentable =
-    li [] [ text (String.fromFloat fermentable.weightGrams ++ " - " ++ fermentable.name) ]
+    li [] [ text (formatGramsToKilos fermentable.weightGrams ++ " - " ++ fermentable.name ++ " total yield: " ++ String.fromInt fermentable.totalYield) ]
+
+
+formatGramsToKilos : Float -> String
+formatGramsToKilos grams =
+    roundFloat (grams / toFloat 1000) 2
+        |> String.fromFloat
+        |> (\val -> val ++ " kg")
 
 
 formatTime : Time.Posix -> String
